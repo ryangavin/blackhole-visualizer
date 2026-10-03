@@ -22,7 +22,7 @@ if (process.platform !== 'darwin') {
 }
 
 const newest = Math.max(...[
-  'src', 'index.html', 'src-tauri', 'package.json', 'package-lock.json',
+  'src', 'public', 'scripts', 'index.html', 'src-tauri', 'package.json', 'package-lock.json',
   'vite.config.ts', 'tsconfig.json',
 ].map((path) => newestSource(join(root, path))));
 
