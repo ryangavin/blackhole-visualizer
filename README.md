@@ -13,7 +13,7 @@ npm start
 
 The launcher builds the release app if it is missing or source files changed, then opens **BlackHole Visualizer.app**. Subsequent launches reuse the build. Close the window or quit the app when finished.
 
-A fresh checkout needs Node 22.18+ (or a newer release with TypeScript stripping), npm, Rust, and Xcode command-line tools. The first build also prepares the preset collection; internet access is needed for dependency and preset downloads. Playback uses local assets afterward.
+A fresh checkout needs Node 22.18+ (or a newer release with TypeScript stripping), npm, Rust, and Xcode command-line tools. Internet access is needed to install dependencies; preset preparation uses the installed Butterchurn favorites. Playback uses local assets afterward.
 
 ## Feed it audio
 
@@ -27,11 +27,9 @@ The app queries actual devices each launch; it does not assume a fixed device ID
 
 ## Preset collections
 
-The preset browser includes the original Butterchurn favorites and the requested [Cream of the Crop collection](https://github.com/projectM-visualizer/presets-cream-of-the-crop). Use collection/category filters and search to find presets; shuffle and navigation follow the current filters.
+The preset browser includes 100 original Butterchurn favorites. Search, shuffle, and navigation work across these presets.
 
-The first build downloads a pinned version of the collection and converts it locally. Only metadata is loaded at startup; each preset's equations and shaders load when selected, with a bounded cache. The packaged app works offline. Conversion failures and timeouts are excluded from the catalogue and recorded in `public/presets/import-report.json`; successful conversion does not guarantee every shader or external texture works in Butterchurn.
-
-See [preset preparation and attribution](docs/presets.md) for the source revision, importer details, and upstream rights notice. Generated preset files are kept out of this Git repository.
+Only metadata is loaded at startup; each preset's equations and shaders load when selected, with a bounded cache. The packaged app works offline. No additional preset packs are downloaded.
 
 ## Performance
 

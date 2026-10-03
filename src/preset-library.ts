@@ -14,7 +14,7 @@ function clonePreset(data: unknown): unknown {
 
 export function getPresetEntries(): PresetEntry[] { return entries; }
 export function getCollectionSummary(): string {
-  return `${entries.length.toLocaleString()} presets · ${catalogue.converted.toLocaleString()} Cream of the Crop · ${catalogue.skipped} conversion skips`;
+  return `${entries.length.toLocaleString()} Butterchurn favorites`;
 }
 export async function loadPresetData(id: string): Promise<unknown> {
   if (!ids.has(id)) throw new Error('Unknown preset');
