@@ -9,8 +9,8 @@ Immutable assignment base: `13bf593ea4f6846d67bebd54cf3fffefb55cdc89`.
 | Owner | Scope | Worktree / branch | Status |
 |---|---|---|---|
 | Orchestrator | npm/Vite/TypeScript setup, launcher, app icon, docs, build and launch | coordinator / work/coordinator | Active |
-| native_audio (Developer) | Rust Core Audio capture and Tauri shell | ../.blackhole-native / work/native-audio | Active |
-| frontend (Developer) | src/** and index.html | ../.blackhole-frontend / work/frontend | Active |
+| native_audio (Developer) | Rust Core Audio capture and Tauri shell | removed / work/native-audio retained | Complete, integrated and cleaned |
+| frontend (Developer) | src/** and index.html | removed / work/frontend retained | Complete, integrated and cleaned |
 
 Integration will preserve immutable source heads here before temporary worktree cleanup. No assignment owns a preview server. The coordinator owns the integrated app.
 
