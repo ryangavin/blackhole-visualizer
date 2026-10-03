@@ -25,6 +25,14 @@ To hear the music while visualizing it, use a **Multi-Output Device** in macOS A
 
 The app queries actual devices each launch; it does not assume a fixed device ID or input pair. Stop listening before changing inputs. BlackHole installation information: <https://github.com/ExistentialAudio/BlackHole>.
 
+## Preset collections
+
+The preset browser includes the original Butterchurn favorites and the requested [Cream of the Crop collection](https://github.com/projectM-visualizer/presets-cream-of-the-crop). Use collection/category filters and search to find presets; shuffle and navigation follow the current filters.
+
+The first build downloads a pinned version of the collection and converts it locally. Only metadata is loaded at startup; each preset's equations and shaders load when selected, with a bounded cache. The packaged app works offline. Conversion failures and timeouts are excluded from the catalogue and recorded in `public/presets/import-report.json`; successful conversion does not guarantee every shader or external texture works in Butterchurn.
+
+See [preset preparation and attribution](docs/presets.md) for the source revision, importer details, and upstream rights notice. Generated preset files are kept out of this Git repository.
+
 ## Performance
 
 Audio capture uses Core Audio through Rust/CPAL. A bounded latest-sample history supplies 1024 samples per channel to Butterchurn; audio does not accumulate in an event queue. WebKit renders locally using WebGL 2. The capture callback does not run JavaScript or send audio to an output device.
