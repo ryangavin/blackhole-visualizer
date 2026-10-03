@@ -386,11 +386,15 @@ function scheduleRender() {
   const delay = Math.max(0, nextRenderAt - performance.now() - 2);
   renderTimer = window.setTimeout(() => { renderTimer = 0; renderRequest = requestAnimationFrame(render); }, delay);
 }
-async function render() {
+async function render(frameTime: number) {
   renderRequest = 0;
   if (paused || document.hidden || !visualizer || !presetReady) return;
   renderInFlight = true;
   const generation = renderGeneration, captureGeneration = audioGeneration;
+  const frameInterval = 1000 / preferences.fps;
+  // Keep a display-clock phase: IPC/conversion/render work consumes this frame's
+  // budget instead of pushing every following frame beyond the next refresh.
+  nextRenderAt = (nextRenderAt || frameTime) + frameInterval;
   try {
     // Exactly one latest-window request per rendered frame, never overlapping.
     if (desktop && capturing && !busy) {
@@ -412,14 +416,20 @@ async function render() {
     const wallDelta = lastVisualTime ? Math.min(.25, Math.max(.001, (now - lastVisualTime) / 1000)) : 1 / preferences.fps;
     lastVisualTime = now;
     const started = performance.now(); visualizer.render({ audioLevels, elapsedTime: wallDelta * preferences.speed }); measuredCPU += performance.now() - started; measuredFrames++;
-    nextRenderAt = now + 1000 / preferences.fps;
     if (now - measuredAt >= 1000) {
       if (!controlsHidden) el('performance').textContent = `${Math.round(measuredFrames * 1000 / (now - measuredAt))} fps · ${(measuredCPU / Math.max(1, measuredFrames)).toFixed(1)} ms renderer CPU`;
       measuredAt = now; measuredFrames = 0; measuredCPU = 0;
     }
     if (preferences.auto && filteredPresets.length && !presetPending && now - presetChangedAt > preferences.interval * 1000) randomPreset();
   } catch (error) { paused = true; el('pause').textContent = '▶'; setMessage(`Rendering paused: ${describeError(error)}. Try another preset and resume.`, 'error'); }
-  finally { renderInFlight = false; scheduleRender(); }
+  finally {
+    if (generation === renderGeneration) {
+      const finishedAt = performance.now();
+      // Skip missed deadlines in one step; never run a catch-up burst of PCM calls.
+      if (nextRenderAt <= finishedAt) nextRenderAt += (Math.floor((finishedAt - nextRenderAt) / frameInterval) + 1) * frameInterval;
+    }
+    renderInFlight = false; scheduleRender();
+  }
 }
 function displayAudioStatus(value: AudioStatus) {
   if (controlsHidden || document.hidden) return;
