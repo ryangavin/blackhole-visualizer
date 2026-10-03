@@ -79,7 +79,7 @@ async function processFiles() {
       const active = worker;
       result = await new Promise((resolveResult) => {
         const finish = (value: { ok: boolean; reason?: string }) => { clearTimeout(timer); active.removeAllListeners('message'); active.removeAllListeners('error'); active.removeAllListeners('exit'); resolveResult(value); };
-        const timer = setTimeout(() => { void active.terminate(); worker = undefined; finish({ ok: false, reason: 'Conversion exceeded 3 second limit' }); }, 3_000);
+        const timer = setTimeout(() => { void active.terminate(); worker = undefined; finish({ ok: false, reason: 'Conversion exceeded 10 second limit' }); }, 10_000);
         active.once('message', finish);
         active.once('error', (error) => { worker = undefined; finish({ ok: false, reason: error.message }); });
         active.once('exit', (code) => { worker = undefined; finish({ ok: false, reason: `Converter exited (${code})` }); });

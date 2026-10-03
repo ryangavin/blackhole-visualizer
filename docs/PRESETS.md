@@ -20,7 +20,7 @@ The installed app includes those files and works offline. Conversion never runs
 in the visualization window or live audio process.
 
 Four isolated worker threads (configurable with `PRESET_IMPORT_WORKERS=1..8`)
-convert the collection with a three-second limit per
+convert the collection with a ten-second limit per
 preset. Invalid equations, converter failures, and timeouts are omitted from the
 selectable catalogue and listed in `public/presets/import-report.json`. Successful
 conversion validates JavaScript equation syntax, not rendered appearance or GPU
