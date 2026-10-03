@@ -34,7 +34,7 @@ let busy = false;
 let paused = false;
 let controlsHidden = false;
 let visualizer: ReturnType<typeof butterchurn.createVisualizer> | null = null;
-let currentPreset = presetById.has(preferences.preset) ? preferences.preset : presetEntries.find(entry => entry.collection === 'Butterchurn' && entry.name === preferences.preset)?.id || presetEntries.find(entry => entry.collection === 'Butterchurn' && /flexi.*martin|martin.*flexi/i.test(entry.name))?.id || presetEntries[0]?.id || '';
+let currentPreset = presetById.has(preferences.preset) ? preferences.preset : presetEntries.find(entry => entry.id.startsWith('builtin/') && entry.name === preferences.preset)?.id || presetEntries.find(entry => entry.id.startsWith('builtin/') && /flexi.*martin|martin.*flexi/i.test(entry.name))?.id || presetEntries[0]?.id || '';
 let presetChangedAt = performance.now();
 let status: AudioStatus | null = null;
 const audioLevels = { timeByteArray: new Uint8Array(1024).fill(128), timeByteArrayL: new Uint8Array(1024).fill(128), timeByteArrayR: new Uint8Array(1024).fill(128) };
