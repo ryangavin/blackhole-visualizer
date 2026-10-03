@@ -1,13 +1,13 @@
 import butterchurn from 'butterchurn';
-import presetPack from 'butterchurn-presets';
+import { getPresetEntries, loadPresetData, type PresetEntry } from './preset-library';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import './style.css';
 
 type AudioDevice = { id: string; name: string; channels: number; sampleRates: number[]; defaultSampleRate: number; bufferMin: number | null; bufferMax: number | null };
 type AudioStatus = { running: boolean; deviceName: string | null; sampleRate: number; channels: number; bufferSize: number | null; leftChannel: number; rightChannel: number; peakLeft: number; peakRight: number; framesReceived: number; lastFrameAgeMs: number | null; error: string | null };
-type Preferences = { device: string; left: number; right: number; rate: number; buffer: number; gain: number; resolution: number; fps: number; preset: string; auto: boolean; interval: number; speed: number; transition: number; renderMode: string; customWidth: number; customHeight: number; fit: string; mesh: string; fxaa: boolean };
-const defaults: Preferences = { device: '', left: 0, right: 1, rate: 0, buffer: 0, gain: 1, resolution: .75, fps: 60, preset: '', auto: false, interval: 30, speed: .5, transition: 4, renderMode: 'adaptive', customWidth: 1920, customHeight: 1080, fit: 'contain', mesh: '48x36', fxaa: true };
+type Preferences = { device: string; left: number; right: number; rate: number; buffer: number; gain: number; resolution: number; fps: number; preset: string; auto: boolean; interval: number; speed: number; transition: number; renderMode: string; customWidth: number; customHeight: number; fit: string; mesh: string; fxaa: boolean; collection: string; category: string };
+const defaults: Preferences = { device: '', left: 0, right: 1, rate: 0, buffer: 0, gain: 1, resolution: .75, fps: 60, preset: '', auto: false, interval: 30, speed: .5, transition: 4, renderMode: 'adaptive', customWidth: 1920, customHeight: 1080, fit: 'contain', mesh: '48x36', fxaa: true, collection: '', category: '' };
 let preferences = { ...defaults };
 try { preferences = { ...defaults, ...JSON.parse(localStorage.getItem('blackhole.preferences') || '{}') }; } catch { /* Fresh preferences if storage is unavailable. */ }
 const bounded = (value: number, fallback: number, min: number, max: number) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
@@ -21,15 +21,20 @@ preferences.mesh = ['24x18', '48x36', '96x72'].includes(preferences.mesh) ? pref
 preferences.customWidth = bounded(preferences.customWidth, 1920, 64, 8192);
 preferences.customHeight = bounded(preferences.customHeight, 1080, 64, 8192);
 const desktop = isTauri();
-const presets = presetPack.getPresets();
-const presetNames = Object.keys(presets).sort((a, b) => a.localeCompare(b));
+const presetEntries = getPresetEntries().sort((a, b) => a.name.localeCompare(b.name));
+const presetById = new Map(presetEntries.map(entry => [entry.id, entry]));
+const searchablePresets = presetEntries.map(entry => ({ entry, text: `${entry.name} ${entry.collection} ${entry.category}`.toLowerCase() }));
+let filteredPresets: PresetEntry[] = [];
+let presetGeneration = 0, presetPending = false, pendingPreset = '';
+let currentPresetData: unknown;
+let presetReady = false;
 let devices: AudioDevice[] = [];
 let capturing = false;
 let busy = false;
 let paused = false;
 let controlsHidden = false;
 let visualizer: ReturnType<typeof butterchurn.createVisualizer> | null = null;
-let currentPreset = presetNames.includes(preferences.preset) ? preferences.preset : presetNames.find(name => /flexi.*martin|martin.*flexi/i.test(name)) || presetNames[0];
+let currentPreset = presetById.has(preferences.preset) ? preferences.preset : presetEntries.find(entry => entry.collection === 'Butterchurn' && entry.name === preferences.preset)?.id || presetEntries.find(entry => entry.collection === 'Butterchurn' && /flexi.*martin|martin.*flexi/i.test(entry.name))?.id || presetEntries[0]?.id || '';
 let presetChangedAt = performance.now();
 let status: AudioStatus | null = null;
 const audioLevels = { timeByteArray: new Uint8Array(1024).fill(128), timeByteArrayL: new Uint8Array(1024).fill(128), timeByteArrayR: new Uint8Array(1024).fill(128) };
@@ -46,9 +51,9 @@ app.innerHTML = `
       <div class="panel-heading"><span class="eyebrow">LIVE SIGNAL</span><span class="tiny">CORE AUDIO → WEBGL</span></div>
       <h1>Sound, made visible.</h1>
       <p class="intro">Your music. A different dimension.</p>
-      <div id="message" class="message" role="status">Finding BlackHole inputs…</div>
+      <div id="message" class="message" role="status">Finding audio inputs…</div>
       <div class="label-row"><label for="device">INPUT SOURCE</label><button id="refresh" class="text-button">↻ Refresh</button></div>
-      <select id="device" aria-label="BlackHole input device"></select>
+      <select id="device" aria-label="Audio input device"></select>
       <div class="channel-grid"><div><label for="left">LEFT CHANNEL</label><select id="left"></select></div><div><label for="right">RIGHT CHANNEL</label><select id="right"></select></div></div>
       <div class="meters" aria-label="Input levels"><span>L</span><div class="meter"><div id="meter-left"></div></div><span>R</span><div class="meter"><div id="meter-right"></div></div></div>
       <button id="capture" class="primary" disabled><span id="capture-icon">▶</span><span id="capture-label">Start listening</span></button>
@@ -59,7 +64,7 @@ app.innerHTML = `
         <p class="small-note">Slows time-based movement. Frame-driven feedback varies by preset; a lower frame target can tame it. Auto drift uses real seconds.</p>
       </div></details>
       <details id="render-settings"><summary>Render & display<span>＋</span></summary><div class="details-content">
-        <label for="render-mode">RENDER BUFFER</label><select id="render-mode"><option value="adaptive">Adaptive · follow window</option><option value="1280x720">1280 × 720 · HD</option><option value="1920x1080">1920 × 1080 · Full HD</option><option value="2560x1440">2560 × 1440 · QHD</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="custom">Custom dimensions</option></select>
+        <button id="live-profile" class="secondary live-profile">Live rig / lower CPU</button><p id="profile-status" class="small-note"></p><label for="render-mode">RENDER BUFFER</label><select id="render-mode"><option value="adaptive">Adaptive · follow window</option><option value="1280x720">1280 × 720 · HD</option><option value="1920x1080">1920 × 1080 · Full HD</option><option value="2560x1440">2560 × 1440 · QHD</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="custom">Custom dimensions</option></select>
         <div id="custom-size" class="custom-size" hidden><div class="channel-grid"><div><label for="custom-width">WIDTH / PX</label><input id="custom-width" type="number" min="64" max="8192" step="1" /></div><div><label for="custom-height">HEIGHT / PX</label><input id="custom-height" type="number" min="64" max="8192" step="1" /></div></div><button id="apply-size" class="secondary">Apply dimensions</button></div>
         <div class="channel-grid"><div><label for="resolution">WINDOW SCALE</label><select id="resolution"><option value="0.25">25% · minimal</option><option value="0.5">50% · lighter</option><option value="0.75">75% · balanced</option><option value="1">100% · sharp</option></select></div><div><label for="fit">DISPLAY FIT</label><select id="fit"><option value="contain">Contain · full frame</option><option value="cover">Cover · crop edges</option><option value="stretch">Stretch · fill screen</option></select></div></div>
         <div class="buffer-readout"><span>ACTUAL BUFFER</span><output id="buffer-size">—</output></div><p id="render-message" class="small-note" role="status">Fixed buffers keep their aspect ratio by default.</p>
@@ -71,19 +76,21 @@ app.innerHTML = `
         <p class="small-note">Device settings apply when listening starts. System default respects your existing routing.</p>
 <div class="telemetry"><span id="audio-info">No active input</span></div>
       </div></details>
-      <details class="routing"><summary>How to route your sound<span>↗</span></summary><div class="details-content"><ol><li>In <strong>Audio MIDI Setup</strong>, create a Multi-Output Device with your speakers or interface and BlackHole. Enable drift correction for the secondary device.</li><li>Choose that Multi-Output Device as your Mac’s sound output, or send your DAW directly to BlackHole.</li><li>Select the matching BlackHole channels here and press <strong>Start listening</strong>.</li></ol><p class="small-note">This app only listens. Your existing audio routing handles playback. macOS may ask for microphone access.</p></div></details>
+      <details class="routing"><summary>How to route your sound<span>↗</span></summary><div class="details-content"><p class="small-note"><strong>Audio interface:</strong> select your connected interface, then choose any input channel for the left and right sides. Connect your mixer, instrument, or audio source to those inputs. A mono source can use the same channel on both sides.</p><p class="small-note"><strong>BlackHole loopback:</strong> send your DAW to BlackHole, or create a Multi-Output Device in Audio MIDI Setup with BlackHole and your speakers. Use it as your Mac’s output; enable drift correction for the secondary device. Select BlackHole here.</p><p class="small-note">Press <strong>Start listening</strong> and allow microphone access. This app only listens; your interface or existing routing handles playback.</p></div></details>
     </section>
   </main>
   <footer class="preset-bar chrome">
     <div class="preset-caption"><span class="eyebrow">MILKDROP PRESET</span><span id="preset-count" class="tiny"></span></div>
+    <div class="preset-filters"><select id="collection" aria-label="Preset collection"></select><select id="category" aria-label="Preset category"></select></div>
     <div class="preset-controls"><button id="previous" class="icon-button" title="Previous preset · ←" aria-label="Previous preset">‹</button><div class="preset-picker"><input id="preset-search" type="search" placeholder="Find a preset…" aria-label="Search presets" /><select id="preset" aria-label="Visualization preset"></select></div><button id="next" class="icon-button" title="Next preset · →" aria-label="Next preset">›</button><button id="random" class="secondary" title="Random preset">Shuffle ↗</button><button id="pause" class="icon-button" title="Pause visuals · Space" aria-label="Pause visuals">Ⅱ</button></div>
+    <div id="preset-message" class="preset-message" role="status"></div>
     <div class="footer-row"><label class="auto-label"><input id="auto" type="checkbox" />Auto drift</label><select id="interval" aria-label="Seconds between presets"><option value="15">15 sec</option><option value="30">30 sec</option><option value="60">60 sec</option><option value="120">2 min</option></select><span class="shortcuts">F fullscreen <b>·</b> H hide <b>·</b> ← → presets</span></div>
   </footer>
 `;
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const select = (id: string) => el<HTMLSelectElement>(id);
 const save = () => { try { localStorage.setItem('blackhole.preferences', JSON.stringify(preferences)); } catch { /* Rendering works without storage. */ } };
-const setMessage = (message: string, kind = '') => { el('message').textContent = message; el('message').className = `message ${kind}`; };
+const setMessage = (message: string, kind = '') => { const field = el('message'); if (field.textContent !== message) field.textContent = message; if (field.className !== `message ${kind}`) field.className = `message ${kind}`; };
 const describeError = (error: unknown) => error instanceof Error ? error.message : String(error);
 const option = (text: string, value: string | number) => new Option(text, String(value));
 let visualizerSampleRate = 0;
@@ -116,15 +123,16 @@ function updateDeviceOptions() {
   el<HTMLButtonElement>('capture').disabled = !device || busy || !desktop;
 }
 async function refreshDevices() {
-  if (!desktop) { setMessage('Open the desktop app to listen to BlackHole. This browser preview shows visuals only.'); select('device').replaceChildren(option('Desktop app required', '')); updateDeviceOptions(); return; }
+  if (!desktop) { setMessage('Open the desktop app to listen to an audio input. This browser preview shows visuals only.'); select('device').replaceChildren(option('Desktop app required', '')); updateDeviceOptions(); return; }
   el<HTMLButtonElement>('refresh').disabled = true;
   try {
-    devices = (await invoke<AudioDevice[]>('list_audio_devices')).filter(d => /blackhole/i.test(d.name) && d.channels > 0);
+    devices = (await invoke<AudioDevice[]>('list_audio_devices')).filter(d => d.channels > 0);
     select('device').replaceChildren(...devices.map(d => option(`${d.name} · ${d.channels} inputs`, d.id)));
     if (devices.some(d => d.id === preferences.device)) select('device').value = preferences.device;
+    else if (devices.some(d => /blackhole/i.test(d.name))) select('device').value = devices.find(d => /blackhole/i.test(d.name))!.id;
     preferences.device = select('device').value;
-    if (!devices.length) { select('device').add(option('No BlackHole device found', '')); setMessage('BlackHole isn’t available. Install BlackHole, then refresh inputs. Open the routing guide below for setup.', 'warning'); }
-    else if (!capturing) setMessage('Ready when you are. Route audio to BlackHole, then start listening.');
+    if (!devices.length) { select('device').add(option('No audio input found', '')); setMessage('No audio inputs are available. Connect your interface or install BlackHole, then refresh inputs.', 'warning'); }
+    else if (!capturing) setMessage('Choose your interface or loopback input and its channels, then start listening.');
     updateDeviceOptions(); save();
   } catch (error) { setMessage(`Could not list inputs: ${describeError(error)}`, 'error'); }
   finally { el<HTMLButtonElement>('refresh').disabled = false; }
@@ -140,33 +148,80 @@ function captureUI() {
 }
 async function toggleCapture() {
   if (busy || !desktop) return;
-  busy = true; captureUI();
+  busy = true; audioGeneration++; clearAudio(); captureUI();
   try {
     if (capturing) { await invoke('stop_audio'); capturing = false; audioLevels.timeByteArray.fill(128); audioLevels.timeByteArrayL.fill(128); audioLevels.timeByteArrayR.fill(128); el('audio-info').textContent = 'No active input'; setMessage('Input stopped. Ready for your next session.'); }
-    else { setMessage('Opening BlackHole…'); status = await invoke<AudioStatus>('start_audio', { deviceId: select('device').value, leftChannel: Number(select('left').value), rightChannel: Number(select('right').value), sampleRate: Number(select('rate').value), bufferSize: Number(select('buffer').value) }); capturing = status.running; syncVisualizerSampleRate(status.sampleRate); if (!capturing) throw new Error(status.error || 'The audio input did not start.'); setMessage('Listening. Play audio through BlackHole to bring the visuals to life.'); }
+    else { setMessage('Opening audio input…'); status = await invoke<AudioStatus>('start_audio', { deviceId: select('device').value, leftChannel: Number(select('left').value), rightChannel: Number(select('right').value), sampleRate: Number(select('rate').value), bufferSize: Number(select('buffer').value) }); capturing = status.running; syncVisualizerSampleRate(status.sampleRate); if (!capturing) throw new Error(status.error || 'The audio input did not start.'); setMessage('Listening. Send audio to the selected inputs to bring the visuals to life.'); }
   } catch (error) { setMessage(describeError(error), 'error'); }
-  finally { busy = false; captureUI(); }
+  finally { busy = false; clearAudio(); captureUI(); restartStatusPolling(); }
 }
-function fillPresets(filter = '') {
-  const names = presetNames.filter(name => name.toLowerCase().includes(filter.toLowerCase()));
-  select('preset').replaceChildren(...names.map(name => option(name, name)));
-  if (names.includes(currentPreset)) select('preset').value = currentPreset;
-  el('preset-count').textContent = `${names.length} / ${presetNames.length}`;
+function updatePresetFilters() {
+  const collections = [...new Set(presetEntries.map(entry => entry.collection))].sort();
+  select('collection').replaceChildren(option('All collections', ''), ...collections.map(name => option(name, name)));
+  if (!collections.includes(preferences.collection)) preferences.collection = '';
+  select('collection').value = preferences.collection;
+  const categories = [...new Set(presetEntries.filter(entry => !preferences.collection || entry.collection === preferences.collection).map(entry => entry.category))].sort();
+  select('category').replaceChildren(option('All categories', ''), ...categories.map(name => option(name, name)));
+  if (!categories.includes(preferences.category)) preferences.category = '';
+  select('category').value = preferences.category;
 }
-function loadPreset(name: string, blend = preferences.transition) {
-  if (!presets[name] || !visualizer) return;
-  try { visualizer.loadPreset(presets[name], blend * preferences.speed); currentPreset = name; preferences.preset = name; presetChangedAt = performance.now(); if (el<HTMLInputElement>('preset-search').value) el<HTMLInputElement>('preset-search').value = ''; fillPresets(); save(); }
-  catch (error) { setMessage(`This preset could not load: ${describeError(error)}. Try another preset.`, 'error'); }
+function fillPresets() {
+  const filter = el<HTMLInputElement>('preset-search').value.trim().toLowerCase();
+  filteredPresets = searchablePresets.filter(({ entry, text }) => (!preferences.collection || entry.collection === preferences.collection) && (!preferences.category || entry.category === preferences.category) && (!filter || text.includes(filter))).map(({ entry }) => entry);
+  const visible = filteredPresets.slice(0, 200);
+  const selected = filteredPresets.find(entry => entry.id === (pendingPreset || currentPreset));
+  if (selected && !visible.includes(selected)) visible.push(selected);
+  select('preset').replaceChildren(option(filteredPresets.length ? 'Choose a preset…' : 'No matching presets', ''), ...visible.map(entry => option(entry.name, entry.id)));
+  select('preset').value = selected?.id || '';
+  el('preset-count').textContent = `${filteredPresets.length.toLocaleString()} matches${filteredPresets.length > 200 ? ' · first 200 shown' : ''} / ${presetEntries.length.toLocaleString()}`;
+  for (const id of ['previous', 'next', 'random']) el<HTMLButtonElement>(id).disabled = filteredPresets.length === 0;
 }
-function nextPreset(direction: number) { loadPreset(presetNames[(presetNames.indexOf(currentPreset) + direction + presetNames.length) % presetNames.length]); }
-function randomPreset() { const offset = 1 + Math.floor(Math.random() * Math.max(1, presetNames.length - 1)); nextPreset(offset); }
+async function loadPreset(id: string, blend = preferences.transition) {
+  const entry = presetById.get(id);
+  if (!entry || !visualizer) return;
+  const generation = ++presetGeneration; presetPending = true; pendingPreset = id;
+  el('preset-message').textContent = `Loading ${entry.name}…`;
+  try {
+    const data = await loadPresetData(id);
+    if (generation !== presetGeneration || !visualizer) return;
+    try { visualizer.loadPreset(data, blend * preferences.speed); }
+    catch (error) {
+      if (currentPresetData) {
+        try { visualizer.loadPreset(currentPresetData, 0); }
+        catch (restoreError) { presetReady = false; throw new Error(`${describeError(error)}; restoring the previous preset also failed: ${describeError(restoreError)}`); }
+      }
+      throw error;
+    }
+    currentPresetData = data; presetReady = true; currentPreset = id; preferences.preset = id; presetChangedAt = performance.now();
+    el('preset-message').textContent = `${entry.name} · ${entry.collection} / ${entry.category}`;
+    save();
+  } catch (error) {
+    if (generation === presetGeneration) { presetChangedAt = performance.now(); el('preset-message').textContent = `Could not load ${entry.name}: ${describeError(error)}. ${presetReady ? 'Keeping the previous preset.' : 'Choose another preset.'}`; }
+  } finally {
+    if (generation === presetGeneration) { presetPending = false; pendingPreset = ''; fillPresets(); scheduleRender(); }
+  }
+}
+function nextPreset(direction: number) {
+  if (!filteredPresets.length) return;
+  const index = filteredPresets.findIndex(entry => entry.id === (pendingPreset || currentPreset));
+  const next = index < 0 ? (direction < 0 ? filteredPresets.length - 1 : 0) : (index + direction + filteredPresets.length) % filteredPresets.length;
+  void loadPreset(filteredPresets[next].id);
+}
+function randomPreset() {
+  if (!filteredPresets.length) return;
+  const current = filteredPresets.findIndex(entry => entry.id === currentPreset);
+  let index = Math.floor(Math.random() * Math.max(1, filteredPresets.length - (current >= 0 ? 1 : 0)));
+  if (current >= 0 && index >= current && filteredPresets.length > 1) index++;
+  void loadPreset(filteredPresets[index].id);
+}
 function toggleControls() {
   controlsHidden = !controlsHidden;
   if (controlsHidden && document.activeElement instanceof HTMLElement) document.activeElement.blur();
   document.body.classList.toggle('controls-hidden', controlsHidden);
+  if (!controlsHidden && capturing && status) displayAudioStatus(status);
   for (const chrome of document.querySelectorAll<HTMLElement>('.chrome')) { chrome.inert = controlsHidden; chrome.setAttribute('aria-hidden', String(controlsHidden)); }
 }
-function togglePause() { paused = !paused; lastVisualTime = 0; lastRender = 0; el('pause').textContent = paused ? '▶' : 'Ⅱ'; el('pause').setAttribute('aria-label', paused ? 'Resume visuals' : 'Pause visuals'); }
+function togglePause() { paused = !paused; resetRenderScheduler(); el('pause').textContent = paused ? '▶' : 'Ⅱ'; el('pause').setAttribute('aria-label', paused ? 'Resume visuals' : 'Pause visuals'); }
 async function fullscreen() { try { if (desktop) { const win = getCurrentWindow(); await win.setFullscreen(!await win.isFullscreen()); } else if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch (error) { setMessage(`Fullscreen unavailable: ${describeError(error)}`, 'error'); } }
 let gl: WebGL2RenderingContext | null = null;
 let bufferWidth = 0, bufferHeight = 0;
@@ -254,17 +309,20 @@ el('capture').addEventListener('click', toggleCapture);
 select('device').addEventListener('change', () => { preferences.device = select('device').value; updateDeviceOptions(); save(); });
 for (const id of ['left', 'right', 'rate', 'buffer', 'fps', 'interval'] as const) {
   if (['fps', 'interval'].includes(id)) select(id).value = String(preferences[id]);
-  select(id).addEventListener('change', () => { preferences[id] = Number(select(id).value); if (id === 'fps' && ![15, 24, 30, 60].includes(preferences.fps)) preferences.fps = 60; save(); });
+  select(id).addEventListener('change', () => { preferences[id] = Number(select(id).value); if (id === 'fps' && ![15, 24, 30, 60].includes(preferences.fps)) preferences.fps = 60; if (id === 'fps') { updateProfileStatus(); resetRenderScheduler(); } save(); });
 }
 const gain = el<HTMLInputElement>('gain'); gain.value = String(preferences.gain);
 const updateGain = () => { preferences.gain = Number(gain.value); el('gain-value').textContent = `${preferences.gain.toFixed(2)}×`; save(); }; gain.addEventListener('input', updateGain); updateGain();
 el('previous').addEventListener('click', () => nextPreset(-1)); el('next').addEventListener('click', () => nextPreset(1)); el('random').addEventListener('click', randomPreset); el('pause').addEventListener('click', togglePause);
-select('preset').addEventListener('change', () => loadPreset(select('preset').value)); el('preset-search').addEventListener('input', () => fillPresets(el<HTMLInputElement>('preset-search').value));
+select('preset').addEventListener('change', () => { void loadPreset(select('preset').value); });
+let searchTimer = 0;
+el('preset-search').addEventListener('input', () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(fillPresets, 100); });
+for (const id of ['collection', 'category'] as const) select(id).addEventListener('change', () => { preferences[id] = select(id).value; if (id === 'collection') { preferences.category = ''; updatePresetFilters(); } fillPresets(); save(); });
 el<HTMLInputElement>('auto').checked = preferences.auto; el('auto').addEventListener('change', () => { preferences.auto = el<HTMLInputElement>('auto').checked; presetChangedAt = performance.now(); save(); });
 el('hide').addEventListener('click', toggleControls); el('fullscreen').addEventListener('click', fullscreen);
 for (const id of ['speed', 'transition'] as const) {
   const input = el<HTMLInputElement>(id); input.value = String(preferences[id]);
-  const update = () => { preferences[id] = Number(input.value); el(`${id}-value`).textContent = id === 'speed' ? `${preferences[id].toFixed(2)}×` : `${preferences[id].toFixed(1)} sec`; save(); };
+  const update = () => { preferences[id] = Number(input.value); el(`${id}-value`).textContent = id === 'speed' ? `${preferences[id].toFixed(2)}×` : `${preferences[id].toFixed(1)} sec`; updateProfileStatus(); save(); };
   input.addEventListener('input', update); update();
 }
 select('render-mode').value = preferences.renderMode; select('resolution').value = String(preferences.resolution); select('fit').value = preferences.fit; select('mesh').value = preferences.mesh;
@@ -277,9 +335,17 @@ el('apply-size').addEventListener('click', () => {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 64 || height < 64) { el('render-message').textContent = 'Enter dimensions of at least 64 pixels.'; return; }
   applyRenderPreference(() => { preferences.customWidth = Math.round(width); preferences.customHeight = Math.round(height); });
 });
-select('mesh').addEventListener('change', () => { preferences.mesh = select('mesh').value; applyQuality(); save(); });
+select('mesh').addEventListener('change', () => { preferences.mesh = select('mesh').value; applyQuality(); updateProfileStatus(); save(); });
 el('fxaa').addEventListener('change', () => { preferences.fxaa = el<HTMLInputElement>('fxaa').checked; applyQuality(); save(); });
-updateRenderUI();
+function updateProfileStatus() {
+  el('profile-status').textContent = preferences.fps === 30 && preferences.mesh === '24x18' && preferences.transition === 0 ? 'Live rig: 30 fps · light mesh · instant preset changes. Resolution and FXAA stay as chosen.' : 'Custom. Live rig sets 30 fps, light mesh, and instant preset changes; keeps your resolution and FXAA.';
+}
+el('live-profile').addEventListener('click', () => {
+  preferences.fps = 30; preferences.mesh = '24x18'; preferences.transition = 0;
+  select('fps').value = '30'; select('mesh').value = '24x18'; el<HTMLInputElement>('transition').value = '0'; el('transition-value').textContent = '0.0 sec';
+  applyQuality(); updateProfileStatus(); resetRenderScheduler(); save();
+});
+updateProfileStatus(); updateRenderUI(); updatePresetFilters();
 window.addEventListener('keydown', event => {
   const target = event.target as HTMLElement;
   if (event.metaKey || event.ctrlKey || event.altKey || event.repeat || target.closest('textarea, [contenteditable="true"], input:not([type="range"]):not([type="checkbox"])')) return;
@@ -293,7 +359,7 @@ window.addEventListener('keydown', event => {
 });
 let resizeRequest = 0;
 window.addEventListener('resize', () => { displayCanvas(); window.clearTimeout(resizeRequest); resizeRequest = window.setTimeout(() => { resizeRequest = 0; resize(); }, 180); });
-document.addEventListener('visibilitychange', () => { lastVisualTime = 0; lastRender = 0; });
+document.addEventListener('visibilitychange', resetRenderScheduler);
 const canvas = el<HTMLCanvasElement>('visualizer');
 canvas.width = 64; canvas.height = 64;
 try {
@@ -304,42 +370,82 @@ try {
 fillPresets();
 if (visualizer) void refreshDevices();
 let lastVisualTime = 0;
-let lastRender = 0, measuredAt = performance.now(), measuredFrames = 0, measuredCPU = 0;
-function render(now: number) {
-  requestAnimationFrame(render);
-  if (paused || !visualizer || document.hidden) return;
-  const interval = 1000 / preferences.fps;
-  if (now - lastRender < interval - .7) return;
-  lastRender = now - ((now - lastRender) % interval);
-  const wallDelta = lastVisualTime ? Math.min(.25, Math.max(.001, (now - lastVisualTime) / 1000)) : 1 / preferences.fps;
-  lastVisualTime = now;
-  try { const started = performance.now(); visualizer.render({ audioLevels, elapsedTime: wallDelta * preferences.speed }); measuredCPU += performance.now() - started; measuredFrames++; }
-  catch (error) { paused = true; el('pause').textContent = '▶'; setMessage(`Rendering paused: ${describeError(error)}. Try another preset and resume.`, 'error'); }
-  if (now - measuredAt >= 1000) { el('performance').textContent = `${Math.round(measuredFrames * 1000 / (now - measuredAt))} fps · ${(measuredCPU / Math.max(1, measuredFrames)).toFixed(1)} ms CPU`; measuredAt = now; measuredFrames = 0; measuredCPU = 0; }
-  if (preferences.auto && now - presetChangedAt > preferences.interval * 1000) randomPreset();
+let measuredAt = performance.now(), measuredFrames = 0, measuredCPU = 0;
+let renderTimer = 0, renderRequest = 0, renderInFlight = false, renderGeneration = 0;
+let nextRenderAt = 0, audioGeneration = 0;
+let statusTimer = 0, statusInFlight = false;
+function clearAudio() { audioLevels.timeByteArray.fill(128); audioLevels.timeByteArrayL.fill(128); audioLevels.timeByteArrayR.fill(128); }
+function resetRenderScheduler() {
+  renderGeneration++; window.clearTimeout(renderTimer); cancelAnimationFrame(renderRequest); renderTimer = 0; renderRequest = 0;
+  lastVisualTime = 0; nextRenderAt = 0; measuredAt = performance.now(); measuredFrames = 0; measuredCPU = 0; clearAudio();
+  scheduleRender();
 }
-requestAnimationFrame(render);
-let lastStatusAt = 0;
-async function pollAudio() {
+function scheduleRender() {
+  if (paused || document.hidden || !visualizer || !presetReady || renderInFlight || renderRequest || renderTimer) return;
+  // Sleep between requested frames instead of waking at the display refresh rate.
+  const delay = Math.max(0, nextRenderAt - performance.now() - 2);
+  renderTimer = window.setTimeout(() => { renderTimer = 0; renderRequest = requestAnimationFrame(render); }, delay);
+}
+async function render() {
+  renderRequest = 0;
+  if (paused || document.hidden || !visualizer || !presetReady) return;
+  renderInFlight = true;
+  const generation = renderGeneration, captureGeneration = audioGeneration;
   try {
-    if (desktop && capturing) {
-      const frame = await invoke<ArrayBuffer>('get_audio_frame');
-      if (frame instanceof ArrayBuffer && frame.byteLength === 8192) {
-        const samples = new Float32Array(frame); const sensitivity = preferences.gain;
-        for (let i = 0; i < 1024; i++) { const left = Number.isFinite(samples[i]) ? samples[i] * sensitivity : 0; const right = Number.isFinite(samples[i + 1024]) ? samples[i + 1024] * sensitivity : 0; audioLevels.timeByteArrayL[i] = Math.max(0, Math.min(255, Math.round(128 + left * 127))); audioLevels.timeByteArrayR[i] = Math.max(0, Math.min(255, Math.round(128 + right * 127))); audioLevels.timeByteArray[i] = Math.max(0, Math.min(255, Math.round(128 + (left + right) * 63.5))); }
+    // Exactly one latest-window request per rendered frame, never overlapping.
+    if (desktop && capturing && !busy) {
+      try {
+        const frame = await invoke<ArrayBuffer>('get_audio_frame');
+        if (generation !== renderGeneration || captureGeneration !== audioGeneration || paused || document.hidden) return;
+        if (!(frame instanceof ArrayBuffer) || frame.byteLength !== 8192) throw new Error('The audio input returned an invalid sample window.');
+        {
+          const samples = new Float32Array(frame), sensitivity = preferences.gain;
+          for (let i = 0; i < 1024; i++) { const left = Number.isFinite(samples[i]) ? samples[i] * sensitivity : 0; const right = Number.isFinite(samples[i + 1024]) ? samples[i + 1024] * sensitivity : 0; audioLevels.timeByteArrayL[i] = Math.max(0, Math.min(255, Math.round(128 + left * 127))); audioLevels.timeByteArrayR[i] = Math.max(0, Math.min(255, Math.round(128 + right * 127))); audioLevels.timeByteArray[i] = Math.max(0, Math.min(255, Math.round(128 + (left + right) * 63.5))); }
+        }
+      } catch (error) {
+        if (captureGeneration !== audioGeneration || generation !== renderGeneration) return;
+        setMessage(`Audio connection interrupted: ${describeError(error)}`, 'error'); capturing = false; audioGeneration++; clearAudio(); captureUI(); restartStatusPolling();
       }
-      if (performance.now() - lastStatusAt > 500) {
-        lastStatusAt = performance.now(); status = await invoke<AudioStatus>('get_audio_status'); syncVisualizerSampleRate(status.sampleRate);
-        for (const side of ['left', 'right'] as const) { const peak = side === 'left' ? status.peakLeft : status.peakRight; const meter = el(`meter-${side}`); meter.style.transform = `scaleX(${Math.max(0, Math.min(1, peak > 0 ? (20 * Math.log10(peak) + 60) / 60 : 0))})`; meter.classList.toggle('clipping', peak >= .99); }
-        el('audio-info').textContent = `${status.sampleRate / 1000} kHz${status.bufferSize ? ` · ${status.bufferSize} frames` : ''}`;
-        if (status.error) setMessage(status.error, 'error');
-        else if (status.lastFrameAgeMs == null || status.lastFrameAgeMs > 2000) setMessage('Waiting for audio frames. Check BlackHole routing and microphone permission.', 'warning');
-        else if (status.peakLeft < .0001 && status.peakRight < .0001) setMessage('Connected, but the input is silent. Send your music to BlackHole.');
-        else setMessage(`Receiving audio from ${status.deviceName || 'BlackHole'}.`, 'success');
-        if (!status.running) { capturing = false; audioLevels.timeByteArray.fill(128); audioLevels.timeByteArrayL.fill(128); audioLevels.timeByteArrayR.fill(128); captureUI(); }
-      }
-    } else { el('meter-left').style.transform = 'scaleX(0)'; el('meter-right').style.transform = 'scaleX(0)'; }
-  } catch (error) { setMessage(`Audio connection interrupted: ${describeError(error)}`, 'error'); capturing = false; captureUI(); }
-  finally { window.setTimeout(pollAudio, capturing && !document.hidden ? (paused ? 50 : 16) : 250); }
+    }
+    if (generation !== renderGeneration || paused || document.hidden) return;
+    const now = performance.now();
+    const wallDelta = lastVisualTime ? Math.min(.25, Math.max(.001, (now - lastVisualTime) / 1000)) : 1 / preferences.fps;
+    lastVisualTime = now;
+    const started = performance.now(); visualizer.render({ audioLevels, elapsedTime: wallDelta * preferences.speed }); measuredCPU += performance.now() - started; measuredFrames++;
+    nextRenderAt = now + 1000 / preferences.fps;
+    if (now - measuredAt >= 1000) {
+      if (!controlsHidden) el('performance').textContent = `${Math.round(measuredFrames * 1000 / (now - measuredAt))} fps · ${(measuredCPU / Math.max(1, measuredFrames)).toFixed(1)} ms renderer CPU`;
+      measuredAt = now; measuredFrames = 0; measuredCPU = 0;
+    }
+    if (preferences.auto && filteredPresets.length && !presetPending && now - presetChangedAt > preferences.interval * 1000) randomPreset();
+  } catch (error) { paused = true; el('pause').textContent = '▶'; setMessage(`Rendering paused: ${describeError(error)}. Try another preset and resume.`, 'error'); }
+  finally { renderInFlight = false; scheduleRender(); }
 }
-void pollAudio();
+function displayAudioStatus(value: AudioStatus) {
+  if (controlsHidden || document.hidden) return;
+  for (const side of ['left', 'right'] as const) { const peak = side === 'left' ? value.peakLeft : value.peakRight; const meter = el(`meter-${side}`); meter.style.transform = `scaleX(${Math.max(0, Math.min(1, peak > 0 ? (20 * Math.log10(peak) + 60) / 60 : 0))})`; meter.classList.toggle('clipping', peak >= .99); }
+  const audioInfo = `${value.sampleRate / 1000} kHz${value.bufferSize ? ` · ${value.bufferSize} frames` : ''}`;
+  if (el('audio-info').textContent !== audioInfo) el('audio-info').textContent = audioInfo;
+  if (value.error) setMessage(value.error, 'error');
+  else if (value.lastFrameAgeMs == null || value.lastFrameAgeMs > 2000) setMessage('Waiting for audio frames. Check your input routing and microphone permission.', 'warning');
+  else if (value.peakLeft < .0001 && value.peakRight < .0001) setMessage('Connected, but the input is silent. Check the source and selected channels.');
+  else setMessage(`Receiving audio from ${value.deviceName || 'your input'}.`, 'success');
+}
+function restartStatusPolling() {
+  window.clearTimeout(statusTimer); statusTimer = 0;
+  if (desktop && capturing && !statusInFlight) statusTimer = window.setTimeout(pollStatus, 0);
+  if (!capturing && !controlsHidden) { el('meter-left').style.transform = 'scaleX(0)'; el('meter-right').style.transform = 'scaleX(0)'; }
+}
+async function pollStatus() {
+  statusTimer = 0;
+  if (!desktop || !capturing || statusInFlight) return;
+  statusInFlight = true; const generation = audioGeneration;
+  try {
+    const value = await invoke<AudioStatus>('get_audio_status');
+    if (generation !== audioGeneration) return;
+    status = value; syncVisualizerSampleRate(value.sampleRate); displayAudioStatus(value);
+    if (!value.running) { capturing = false; audioGeneration++; clearAudio(); captureUI(); }
+  } catch (error) { if (generation === audioGeneration) setMessage(`Could not read input status: ${describeError(error)}`, 'error'); }
+  finally { statusInFlight = false; if (capturing) statusTimer = window.setTimeout(pollStatus, 1000); }
+}
+scheduleRender();
