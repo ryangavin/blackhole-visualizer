@@ -203,20 +203,37 @@ function resize(): boolean {
   width = Math.max(1, Math.floor(width * factor)); height = Math.max(1, Math.floor(height * factor));
   const oldWidth = bufferWidth, oldHeight = bufferHeight;
   try {
-    if (width !== bufferWidth || height !== bufferHeight) {
+    if (width !== bufferWidth || height !== bufferHeight || canvas.width !== width || canvas.height !== height || gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) {
       // Discard prior errors so resize diagnostics describe this allocation only.
       for (let i = 0; i < 8 && gl.getError() !== gl.NO_ERROR; i++) { /* drain */ }
+      // Butterchurn resizes its textures, not the canvas's presentation buffer.
+      // Set intrinsic dimensions first because setRendererSize rerenders immediately.
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
       visualizer.setRendererSize(width, height);
-      const error = gl.getError(); if (error !== gl.NO_ERROR) throw new Error(`GPU allocation error ${error}`);
+      const error = gl.getError(); if (error !== gl.NO_ERROR) throw new Error(`GPU allocation error ${error}; requested ${width} × ${height}, observed ${gl.drawingBufferWidth} × ${gl.drawingBufferHeight}`);
+      if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) throw new Error(`Requested ${width} × ${height}, but WebGL allocated ${gl.drawingBufferWidth} × ${gl.drawingBufferHeight}`);
       bufferWidth = width; bufferHeight = height;
     }
     displayCanvas();
-    el('buffer-size').textContent = `${bufferWidth.toLocaleString()} × ${bufferHeight.toLocaleString()}`;
+    el('buffer-size').textContent = `${gl.drawingBufferWidth.toLocaleString()} × ${gl.drawingBufferHeight.toLocaleString()}`;
     el('render-message').textContent = factor < 1 ? 'Size reduced to fit GPU limits and the 4K pixel budget.' : preferences.renderMode === 'adaptive' ? 'Follows the window. Retina density is capped at 2×.' : preferences.fit === 'stretch' ? 'Stretch fills the screen and changes the image proportions.' : preferences.fit === 'cover' ? 'Aspect preserved; edges may be cropped.' : 'Aspect preserved. Unused screen area stays black.';
     return true;
   } catch (error) {
-    if (oldWidth && oldHeight) { try { visualizer.setRendererSize(oldWidth, oldHeight); bufferWidth = oldWidth; bufferHeight = oldHeight; displayCanvas(); } catch { /* Report the original failure; no further allocation attempts. */ } }
-    el('render-message').textContent = `Could not resize: ${describeError(error)}. Choose a smaller buffer.`;
+    let recoveryError = '';
+    if (oldWidth && oldHeight) {
+      try {
+        for (let i = 0; i < 8 && gl.getError() !== gl.NO_ERROR; i++) { /* drain original allocation errors */ }
+        if (canvas.width !== oldWidth) canvas.width = oldWidth;
+        if (canvas.height !== oldHeight) canvas.height = oldHeight;
+        visualizer.setRendererSize(oldWidth, oldHeight);
+        const restoreError = gl.getError();
+        if (restoreError !== gl.NO_ERROR || gl.drawingBufferWidth !== oldWidth || gl.drawingBufferHeight !== oldHeight) throw new Error('The previous drawing buffer could not be restored');
+        bufferWidth = oldWidth; bufferHeight = oldHeight; displayCanvas();
+      } catch (restoreError) { recoveryError = ` ${describeError(restoreError)}.`; }
+    }
+    el('buffer-size').textContent = `${gl.drawingBufferWidth.toLocaleString()} × ${gl.drawingBufferHeight.toLocaleString()}`;
+    el('render-message').textContent = `Could not resize: ${describeError(error)}.${recoveryError} Choose a smaller buffer.`;
     return false;
   }
 }
@@ -278,6 +295,7 @@ let resizeRequest = 0;
 window.addEventListener('resize', () => { displayCanvas(); window.clearTimeout(resizeRequest); resizeRequest = window.setTimeout(() => { resizeRequest = 0; resize(); }, 180); });
 document.addEventListener('visibilitychange', () => { lastVisualTime = 0; lastRender = 0; });
 const canvas = el<HTMLCanvasElement>('visualizer');
+canvas.width = 64; canvas.height = 64;
 try {
   gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
   if (!gl) throw new Error('WebGL 2 is unavailable in this WebKit view. Update macOS and reopen the app.');
