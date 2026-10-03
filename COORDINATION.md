@@ -1,5 +1,9 @@
 # BlackHole Visualizer
 
+## Active: visible canvas resolution fix
+
+Ryan reports blurry output even at 4K. Source inspection found no assignment of the visible canvas intrinsic width/height; Butterchurn 2.6.7 only resizes its internal renderer textures. Developer `/root/frontend` owns the narrow fix in `src/main.ts` and optional README note, isolated `/Users/ryan/Code/ryangavin/.blackhole-resolution`, branch `work/canvas-resolution`, base `99765da5ef5696938a96b6bb05dd9af463055518`. Keep native capture, preferences, effects and current running app unchanged. Fix intrinsic canvas dimensions, observed WebGL drawing-buffer readout, initialization and rollback. No tests; compile/probe allowed. Status: active; no preview server. Integrator will combine immutable commit and rebuild, followed by preservation-checked cleanup; refs and main retained.
+
 User scope: complete macOS Tauri/Butterchurn app using BlackHole. No tests; Ryan is the first hands-on tester. Compile checks and probes are allowed. No remote publishing or main updates.
 
 Coordinator: `/Users/ryan/Code/ryangavin/blackhole-visualizer`, branch `work/coordinator`.
