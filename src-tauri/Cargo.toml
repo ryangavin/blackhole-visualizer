@@ -1,0 +1,12 @@
+[package]
+name = "blackhole-visualizer"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.6", features = [] }
+serde = { version = "1", features = ["derive"] }
+cpal = "0.18.2"
