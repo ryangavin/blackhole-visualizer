@@ -34,3 +34,11 @@ Combined verification performed by Integrator: `npm run web:build` passed; `RUST
 Cleanup authorized by Orchestrator after builds/review. Source heads verified unchanged; tracked trees clean. Frontend has no untracked/ignored content. Native has only an untracked icon.png identical by SHA256 to preserved coordinator icon plus regenerable Cargo target and generated Tauri schemas. Source commits preserved through recorded cherry-pick mappings and retained branches. No assignment owns servers or preview tabs.
 
 Cleanup completed: both temporary assignment worktrees removed without force, after removing only the verified duplicate native icon and regenerable native build/schema caches. Their branches remain. Coordinator app bundle/worktree and saved main remain. No server/tab cleanup was needed.
+
+## Live presentation controls
+
+Ryan has run the app and requests slower motion, additional controls, explicit render dimensions, and completely overlay-free H mode for a large-screen presentation tonight. Earlier no-tests instruction remains; compile/static checks only. Do not close or interrupt his running app.
+
+Developer `/root/frontend` owns `src/**` and relevant README updates in `/Users/ryan/Code/ryangavin/.blackhole-controls`, branch `work/live-controls`, from immutable coordinator base `f0fdf640b92865fb5088006d1fa8a9a6a24ccaa3`. Status: active. No preview server allocated. Scope includes animation speed/transitions, render-size presets/custom dimensions/adaptive scale, mesh/FXAA, clean presentation mode and keyboard behavior.
+
+Orchestrator retains coordinator/runtime ownership. Integrator will combine the completed immutable head and rebuild the app; Review will inspect that revision without tests or GUI capture. Source worktree cleanup follows recorded preservation checks. No main updates, remote actions, or branch deletion authorized.
