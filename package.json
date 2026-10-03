@@ -9,10 +9,11 @@
   "scripts": {
     "start": "node scripts/start.ts",
     "dev": "tauri dev",
-    "web:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "web:build": "tsc --noEmit && vite build",
+    "web:dev": "npm run presets:prepare && vite --host 127.0.0.1 --port 1420 --strictPort",
+    "web:build": "npm run presets:prepare && tsc --noEmit && vite build",
     "build": "tauri build --bundles app",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "presets:prepare": "node scripts/import-presets.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.0",
     "@types/node": "^24.0.0",
+    "milkdrop-preset-converter": "0.1.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.0"
   }

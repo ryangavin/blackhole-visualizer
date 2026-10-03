@@ -4,3 +4,7 @@ src-tauri/target/
 src-tauri/gen/
 .DS_Store
 *.log
+.cache/
+public/presets/
+src/generated/preset-catalogue.json
+COORDINATION.md
