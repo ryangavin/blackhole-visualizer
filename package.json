@@ -1,0 +1,26 @@
+{
+  "name": "blackhole-visualizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "start": "node scripts/start.ts",
+    "dev": "tauri dev",
+    "web:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "web:build": "tsc --noEmit && vite build",
+    "build": "tauri build --bundles app",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.1",
+    "butterchurn": "2.6.7",
+    "butterchurn-presets": "2.4.7"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}
