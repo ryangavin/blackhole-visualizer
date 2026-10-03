@@ -5,6 +5,12 @@ const entries: PresetEntry[] = catalogue.entries;
 const ids = new Set(entries.map((entry) => entry.id));
 const cache = new Map<string, unknown>();
 const pending = new Map<string, Promise<unknown>>();
+function clonePreset(data: unknown): unknown {
+  // macOS 12.0's WebKit predates structuredClone; preset payloads are pure JSON.
+  return typeof globalThis.structuredClone === 'function'
+    ? globalThis.structuredClone(data)
+    : JSON.parse(JSON.stringify(data));
+}
 
 export function getPresetEntries(): PresetEntry[] { return entries; }
 export function getCollectionSummary(): string {
@@ -15,7 +21,7 @@ export async function loadPresetData(id: string): Promise<unknown> {
   if (cache.has(id)) {
     const data = cache.get(id);
     cache.delete(id); cache.set(id, data);
-    return structuredClone(data);
+    return clonePreset(data);
   }
   let request = pending.get(id);
   if (!request) {
@@ -29,5 +35,5 @@ export async function loadPresetData(id: string): Promise<unknown> {
     pending.set(id, request);
   }
   // Butterchurn mutates nested preset data while loading; cache stays pristine.
-  return structuredClone(await request);
+  return clonePreset(await request);
 }
