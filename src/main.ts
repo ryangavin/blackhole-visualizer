@@ -6,10 +6,20 @@ import './style.css';
 
 type AudioDevice = { id: string; name: string; channels: number; sampleRates: number[]; defaultSampleRate: number; bufferMin: number | null; bufferMax: number | null };
 type AudioStatus = { running: boolean; deviceName: string | null; sampleRate: number; channels: number; bufferSize: number | null; leftChannel: number; rightChannel: number; peakLeft: number; peakRight: number; framesReceived: number; lastFrameAgeMs: number | null; error: string | null };
-type Preferences = { device: string; left: number; right: number; rate: number; buffer: number; gain: number; resolution: number; fps: number; preset: string; auto: boolean; interval: number };
-const defaults: Preferences = { device: '', left: 0, right: 1, rate: 0, buffer: 0, gain: 1, resolution: .75, fps: 60, preset: '', auto: false, interval: 30 };
+type Preferences = { device: string; left: number; right: number; rate: number; buffer: number; gain: number; resolution: number; fps: number; preset: string; auto: boolean; interval: number; speed: number; transition: number; renderMode: string; customWidth: number; customHeight: number; fit: string; mesh: string; fxaa: boolean };
+const defaults: Preferences = { device: '', left: 0, right: 1, rate: 0, buffer: 0, gain: 1, resolution: .75, fps: 60, preset: '', auto: false, interval: 30, speed: .5, transition: 4, renderMode: 'adaptive', customWidth: 1920, customHeight: 1080, fit: 'contain', mesh: '48x36', fxaa: true };
 let preferences = { ...defaults };
 try { preferences = { ...defaults, ...JSON.parse(localStorage.getItem('blackhole.preferences') || '{}') }; } catch { /* Fresh preferences if storage is unavailable. */ }
+const bounded = (value: number, fallback: number, min: number, max: number) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+preferences.speed = bounded(preferences.speed, .5, .1, 2);
+preferences.transition = bounded(preferences.transition, 4, 0, 15);
+preferences.fps = [15, 24, 30, 60].includes(preferences.fps) ? preferences.fps : 60;
+preferences.resolution = [.25, .5, .75, 1].includes(preferences.resolution) ? preferences.resolution : .75;
+preferences.renderMode = ['adaptive', '1280x720', '1920x1080', '2560x1440', '3840x2160', 'custom'].includes(preferences.renderMode) ? preferences.renderMode : 'adaptive';
+preferences.fit = ['contain', 'cover', 'stretch'].includes(preferences.fit) ? preferences.fit : 'contain';
+preferences.mesh = ['24x18', '48x36', '96x72'].includes(preferences.mesh) ? preferences.mesh : '48x36';
+preferences.customWidth = bounded(preferences.customWidth, 1920, 64, 8192);
+preferences.customHeight = bounded(preferences.customHeight, 1080, 64, 8192);
 const desktop = isTauri();
 const presets = presetPack.getPresets();
 const presetNames = Object.keys(presets).sort((a, b) => a.localeCompare(b));
@@ -43,11 +53,23 @@ app.innerHTML = `
       <div class="meters" aria-label="Input levels"><span>L</span><div class="meter"><div id="meter-left"></div></div><span>R</span><div class="meter"><div id="meter-right"></div></div></div>
       <button id="capture" class="primary" disabled><span id="capture-icon">▶</span><span id="capture-label">Start listening</span></button>
       <div class="slider-label"><label for="gain">VISUAL SENSITIVITY</label><output id="gain-value">1.00×</output></div><input id="gain" type="range" min="0.1" max="4" step="0.05" />
-      <details id="settings"><summary>Audio & performance<span>＋</span></summary><div class="details-content">
+      <details id="motion" open><summary>Motion<span>↝</span></summary><div class="details-content">
+        <div class="slider-label"><label for="speed">ANIMATION SPEED</label><output id="speed-value"></output></div><input id="speed" type="range" min="0.1" max="2" step="0.05" />
+        <div class="slider-label"><label for="transition">PRESET TRANSITION</label><output id="transition-value"></output></div><input id="transition" type="range" min="0" max="15" step="0.5" />
+        <p class="small-note">Slows time-based movement. Frame-driven feedback varies by preset; a lower frame target can tame it. Auto drift uses real seconds.</p>
+      </div></details>
+      <details id="render-settings"><summary>Render & display<span>＋</span></summary><div class="details-content">
+        <label for="render-mode">RENDER BUFFER</label><select id="render-mode"><option value="adaptive">Adaptive · follow window</option><option value="1280x720">1280 × 720 · HD</option><option value="1920x1080">1920 × 1080 · Full HD</option><option value="2560x1440">2560 × 1440 · QHD</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="custom">Custom dimensions</option></select>
+        <div id="custom-size" class="custom-size" hidden><div class="channel-grid"><div><label for="custom-width">WIDTH / PX</label><input id="custom-width" type="number" min="64" max="8192" step="1" /></div><div><label for="custom-height">HEIGHT / PX</label><input id="custom-height" type="number" min="64" max="8192" step="1" /></div></div><button id="apply-size" class="secondary">Apply dimensions</button></div>
+        <div class="channel-grid"><div><label for="resolution">WINDOW SCALE</label><select id="resolution"><option value="0.25">25% · minimal</option><option value="0.5">50% · lighter</option><option value="0.75">75% · balanced</option><option value="1">100% · sharp</option></select></div><div><label for="fit">DISPLAY FIT</label><select id="fit"><option value="contain">Contain · full frame</option><option value="cover">Cover · crop edges</option><option value="stretch">Stretch · fill screen</option></select></div></div>
+        <div class="buffer-readout"><span>ACTUAL BUFFER</span><output id="buffer-size">—</output></div><p id="render-message" class="small-note" role="status">Fixed buffers keep their aspect ratio by default.</p>
+        <div class="channel-grid"><div><label for="mesh">MESH DETAIL</label><select id="mesh"><option value="24x18">24 × 18 · lighter</option><option value="48x36">48 × 36 · balanced</option><option value="96x72">96 × 72 · detailed</option></select></div><div><label for="fps">FRAME TARGET</label><select id="fps"><option value="15">15 fps</option><option value="24">24 fps</option><option value="30">30 fps</option><option value="60">60 fps</option></select></div></div>
+        <label class="auto-label fxaa"><input id="fxaa" type="checkbox" />Smooth edges / FXAA</label><div class="telemetry"><span id="performance">— fps · — ms</span></div>
+      </div></details>
+      <details id="settings"><summary>Audio settings<span>＋</span></summary><div class="details-content">
         <div class="channel-grid"><div><label for="rate">SAMPLE RATE</label><select id="rate"></select></div><div><label for="buffer">BUFFER FRAMES</label><select id="buffer"></select></div></div>
         <p class="small-note">Device settings apply when listening starts. System default respects your existing routing.</p>
-        <div class="channel-grid"><div><label for="resolution">RENDER SCALE</label><select id="resolution"><option value="0.5">50% · lighter</option><option value="0.75">75% · balanced</option><option value="1">100% · sharp</option></select></div><div><label for="fps">FRAME TARGET</label><select id="fps"><option value="30">30 fps</option><option value="60">60 fps</option></select></div></div>
-        <div class="telemetry"><span id="performance">— fps · — ms</span><span id="audio-info">No active input</span></div>
+<div class="telemetry"><span id="audio-info">No active input</span></div>
       </div></details>
       <details class="routing"><summary>How to route your sound<span>↗</span></summary><div class="details-content"><ol><li>In <strong>Audio MIDI Setup</strong>, create a Multi-Output Device with your speakers or interface and BlackHole. Enable drift correction for the secondary device.</li><li>Choose that Multi-Output Device as your Mac’s sound output, or send your DAW directly to BlackHole.</li><li>Select the matching BlackHole channels here and press <strong>Start listening</strong>.</li></ol><p class="small-note">This app only listens. Your existing audio routing handles playback. macOS may ask for microphone access.</p></div></details>
     </section>
@@ -57,7 +79,6 @@ app.innerHTML = `
     <div class="preset-controls"><button id="previous" class="icon-button" title="Previous preset · ←" aria-label="Previous preset">‹</button><div class="preset-picker"><input id="preset-search" type="search" placeholder="Find a preset…" aria-label="Search presets" /><select id="preset" aria-label="Visualization preset"></select></div><button id="next" class="icon-button" title="Next preset · →" aria-label="Next preset">›</button><button id="random" class="secondary" title="Random preset">Shuffle ↗</button><button id="pause" class="icon-button" title="Pause visuals · Space" aria-label="Pause visuals">Ⅱ</button></div>
     <div class="footer-row"><label class="auto-label"><input id="auto" type="checkbox" />Auto drift</label><select id="interval" aria-label="Seconds between presets"><option value="15">15 sec</option><option value="30">30 sec</option><option value="60">60 sec</option><option value="120">2 min</option></select><span class="shortcuts">F fullscreen <b>·</b> H hide <b>·</b> ← → presets</span></div>
   </footer>
-  <button id="show" class="show-controls" title="Show controls · H" aria-label="Show controls">◉ <span>Controls</span></button>
 `;
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const select = (id: string) => el<HTMLSelectElement>(id);
@@ -132,47 +153,149 @@ function fillPresets(filter = '') {
   if (names.includes(currentPreset)) select('preset').value = currentPreset;
   el('preset-count').textContent = `${names.length} / ${presetNames.length}`;
 }
-function loadPreset(name: string, blend = 1.8) {
+function loadPreset(name: string, blend = preferences.transition) {
   if (!presets[name] || !visualizer) return;
-  try { visualizer.loadPreset(presets[name], blend); currentPreset = name; preferences.preset = name; presetChangedAt = performance.now(); if (el<HTMLInputElement>('preset-search').value) el<HTMLInputElement>('preset-search').value = ''; fillPresets(); save(); }
+  try { visualizer.loadPreset(presets[name], blend * preferences.speed); currentPreset = name; preferences.preset = name; presetChangedAt = performance.now(); if (el<HTMLInputElement>('preset-search').value) el<HTMLInputElement>('preset-search').value = ''; fillPresets(); save(); }
   catch (error) { setMessage(`This preset could not load: ${describeError(error)}. Try another preset.`, 'error'); }
 }
 function nextPreset(direction: number) { loadPreset(presetNames[(presetNames.indexOf(currentPreset) + direction + presetNames.length) % presetNames.length]); }
 function randomPreset() { const offset = 1 + Math.floor(Math.random() * Math.max(1, presetNames.length - 1)); nextPreset(offset); }
-function toggleControls() { controlsHidden = !controlsHidden; document.body.classList.toggle('controls-hidden', controlsHidden); }
-function togglePause() { paused = !paused; el('pause').textContent = paused ? '▶' : 'Ⅱ'; el('pause').setAttribute('aria-label', paused ? 'Resume visuals' : 'Pause visuals'); }
+function toggleControls() {
+  controlsHidden = !controlsHidden;
+  if (controlsHidden && document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  document.body.classList.toggle('controls-hidden', controlsHidden);
+  for (const chrome of document.querySelectorAll<HTMLElement>('.chrome')) { chrome.inert = controlsHidden; chrome.setAttribute('aria-hidden', String(controlsHidden)); }
+}
+function togglePause() { paused = !paused; lastVisualTime = 0; lastRender = 0; el('pause').textContent = paused ? '▶' : 'Ⅱ'; el('pause').setAttribute('aria-label', paused ? 'Resume visuals' : 'Pause visuals'); }
 async function fullscreen() { try { if (desktop) { const win = getCurrentWindow(); await win.setFullscreen(!await win.isFullscreen()); } else if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch (error) { setMessage(`Fullscreen unavailable: ${describeError(error)}`, 'error'); } }
-function resize() { if (!visualizer) return; const scale = Math.max(.25, Math.min(1, Number(preferences.resolution) || .75)); const ratio = Math.min(window.devicePixelRatio || 1, 2); visualizer.setRendererSize(Math.max(1, Math.round(innerWidth * ratio * scale)), Math.max(1, Math.round(innerHeight * ratio * scale))); }
+let gl: WebGL2RenderingContext | null = null;
+let bufferWidth = 0, bufferHeight = 0;
+let appliedMesh = '', appliedFXAA: boolean | null = null;
+function updateRenderUI() {
+  const adaptive = preferences.renderMode === 'adaptive';
+  select('resolution').disabled = !adaptive;
+  select('fit').disabled = adaptive;
+  el('custom-size').hidden = preferences.renderMode !== 'custom';
+}
+function displayCanvas() {
+  const canvas = el<HTMLCanvasElement>('visualizer');
+  if (!bufferWidth || !bufferHeight) return;
+  let width = innerWidth, height = innerHeight;
+  if (preferences.renderMode !== 'adaptive' && preferences.fit !== 'stretch') {
+    const factor = preferences.fit === 'cover' ? Math.max(innerWidth / bufferWidth, innerHeight / bufferHeight) : Math.min(innerWidth / bufferWidth, innerHeight / bufferHeight);
+    width = bufferWidth * factor; height = bufferHeight * factor;
+  }
+  canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+  canvas.style.left = `${(innerWidth - width) / 2}px`; canvas.style.top = `${(innerHeight - height) / 2}px`;
+}
+function resize(): boolean {
+  if (!visualizer || !gl) return false;
+  let width: number, height: number;
+  if (preferences.renderMode === 'adaptive') {
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    width = innerWidth * ratio * preferences.resolution; height = innerHeight * ratio * preferences.resolution;
+  } else if (preferences.renderMode === 'custom') { width = preferences.customWidth; height = preferences.customHeight; }
+  else { [width, height] = preferences.renderMode.split('x').map(Number); }
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) { el('render-message').textContent = 'Enter positive width and height values.'; return false; }
+  // Butterchurn keeps several full-size GPU textures. Bound the working set to 4K pixels.
+  const dimensionLimit = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), 8192);
+  const factor = Math.min(1, dimensionLimit / width, dimensionLimit / height, Math.sqrt(3840 * 2160 / (width * height)));
+  width = Math.max(1, Math.floor(width * factor)); height = Math.max(1, Math.floor(height * factor));
+  const oldWidth = bufferWidth, oldHeight = bufferHeight;
+  try {
+    if (width !== bufferWidth || height !== bufferHeight) {
+      // Discard prior errors so resize diagnostics describe this allocation only.
+      for (let i = 0; i < 8 && gl.getError() !== gl.NO_ERROR; i++) { /* drain */ }
+      visualizer.setRendererSize(width, height);
+      const error = gl.getError(); if (error !== gl.NO_ERROR) throw new Error(`GPU allocation error ${error}`);
+      bufferWidth = width; bufferHeight = height;
+    }
+    displayCanvas();
+    el('buffer-size').textContent = `${bufferWidth.toLocaleString()} × ${bufferHeight.toLocaleString()}`;
+    el('render-message').textContent = factor < 1 ? 'Size reduced to fit GPU limits and the 4K pixel budget.' : preferences.renderMode === 'adaptive' ? 'Follows the window. Retina density is capped at 2×.' : preferences.fit === 'stretch' ? 'Stretch fills the screen and changes the image proportions.' : preferences.fit === 'cover' ? 'Aspect preserved; edges may be cropped.' : 'Aspect preserved. Unused screen area stays black.';
+    return true;
+  } catch (error) {
+    if (oldWidth && oldHeight) { try { visualizer.setRendererSize(oldWidth, oldHeight); bufferWidth = oldWidth; bufferHeight = oldHeight; displayCanvas(); } catch { /* Report the original failure; no further allocation attempts. */ } }
+    el('render-message').textContent = `Could not resize: ${describeError(error)}. Choose a smaller buffer.`;
+    return false;
+  }
+}
+function applyRenderPreference(change: () => void) {
+  const before = { ...preferences }; change(); updateRenderUI();
+  if (!resize()) { preferences = before; select('render-mode').value = preferences.renderMode; select('resolution').value = String(preferences.resolution); select('fit').value = preferences.fit; updateRenderUI(); displayCanvas(); }
+  save();
+}
+function applyQuality() {
+  if (!visualizer) return;
+  try {
+    if (appliedMesh !== preferences.mesh) { const [width, height] = preferences.mesh.split('x').map(Number); visualizer.setInternalMeshSize(width, height); appliedMesh = preferences.mesh; }
+    if (appliedFXAA !== preferences.fxaa) { visualizer.setOutputAA(preferences.fxaa); appliedFXAA = preferences.fxaa; }
+  } catch (error) { el('render-message').textContent = `Could not apply detail: ${describeError(error)}`; }
+}
 el('refresh').addEventListener('click', refreshDevices);
 el('capture').addEventListener('click', toggleCapture);
 select('device').addEventListener('change', () => { preferences.device = select('device').value; updateDeviceOptions(); save(); });
-for (const id of ['left', 'right', 'rate', 'buffer', 'resolution', 'fps', 'interval'] as const) {
-  if (['resolution', 'fps', 'interval'].includes(id)) select(id).value = String(preferences[id]);
-  select(id).addEventListener('change', () => { preferences[id] = Number(select(id).value); if (id === 'resolution') resize(); save(); });
+for (const id of ['left', 'right', 'rate', 'buffer', 'fps', 'interval'] as const) {
+  if (['fps', 'interval'].includes(id)) select(id).value = String(preferences[id]);
+  select(id).addEventListener('change', () => { preferences[id] = Number(select(id).value); if (id === 'fps' && ![15, 24, 30, 60].includes(preferences.fps)) preferences.fps = 60; save(); });
 }
 const gain = el<HTMLInputElement>('gain'); gain.value = String(preferences.gain);
 const updateGain = () => { preferences.gain = Number(gain.value); el('gain-value').textContent = `${preferences.gain.toFixed(2)}×`; save(); }; gain.addEventListener('input', updateGain); updateGain();
 el('previous').addEventListener('click', () => nextPreset(-1)); el('next').addEventListener('click', () => nextPreset(1)); el('random').addEventListener('click', randomPreset); el('pause').addEventListener('click', togglePause);
 select('preset').addEventListener('change', () => loadPreset(select('preset').value)); el('preset-search').addEventListener('input', () => fillPresets(el<HTMLInputElement>('preset-search').value));
 el<HTMLInputElement>('auto').checked = preferences.auto; el('auto').addEventListener('change', () => { preferences.auto = el<HTMLInputElement>('auto').checked; presetChangedAt = performance.now(); save(); });
-el('hide').addEventListener('click', toggleControls); el('show').addEventListener('click', toggleControls); el('fullscreen').addEventListener('click', fullscreen);
-window.addEventListener('keydown', event => { if ((event.target as HTMLElement)?.matches('input, select, textarea, button') || event.metaKey || event.ctrlKey || event.altKey) return; if (event.key.toLowerCase() === 'f') { event.preventDefault(); void fullscreen(); } if (event.key.toLowerCase() === 'h') toggleControls(); if (event.key === 'ArrowLeft') { event.preventDefault(); nextPreset(-1); } if (event.key === 'ArrowRight') { event.preventDefault(); nextPreset(1); } if (event.code === 'Space') { event.preventDefault(); togglePause(); } });
-window.addEventListener('resize', resize);
+el('hide').addEventListener('click', toggleControls); el('fullscreen').addEventListener('click', fullscreen);
+for (const id of ['speed', 'transition'] as const) {
+  const input = el<HTMLInputElement>(id); input.value = String(preferences[id]);
+  const update = () => { preferences[id] = Number(input.value); el(`${id}-value`).textContent = id === 'speed' ? `${preferences[id].toFixed(2)}×` : `${preferences[id].toFixed(1)} sec`; save(); };
+  input.addEventListener('input', update); update();
+}
+select('render-mode').value = preferences.renderMode; select('resolution').value = String(preferences.resolution); select('fit').value = preferences.fit; select('mesh').value = preferences.mesh;
+el<HTMLInputElement>('custom-width').value = String(preferences.customWidth); el<HTMLInputElement>('custom-height').value = String(preferences.customHeight); el<HTMLInputElement>('fxaa').checked = preferences.fxaa;
+select('render-mode').addEventListener('change', () => applyRenderPreference(() => { preferences.renderMode = select('render-mode').value; }));
+select('resolution').addEventListener('change', () => applyRenderPreference(() => { preferences.resolution = Number(select('resolution').value); }));
+select('fit').addEventListener('change', () => { preferences.fit = select('fit').value; displayCanvas(); save(); });
+el('apply-size').addEventListener('click', () => {
+  const width = Number(el<HTMLInputElement>('custom-width').value), height = Number(el<HTMLInputElement>('custom-height').value);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 64 || height < 64) { el('render-message').textContent = 'Enter dimensions of at least 64 pixels.'; return; }
+  applyRenderPreference(() => { preferences.customWidth = Math.round(width); preferences.customHeight = Math.round(height); });
+});
+select('mesh').addEventListener('change', () => { preferences.mesh = select('mesh').value; applyQuality(); save(); });
+el('fxaa').addEventListener('change', () => { preferences.fxaa = el<HTMLInputElement>('fxaa').checked; applyQuality(); save(); });
+updateRenderUI();
+window.addEventListener('keydown', event => {
+  const target = event.target as HTMLElement;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.repeat || target.closest('textarea, [contenteditable="true"], input:not([type="range"]):not([type="checkbox"])')) return;
+  const key = event.key.toLowerCase();
+  if (key === 'f') { event.preventDefault(); void fullscreen(); return; }
+  if (key === 'h') { event.preventDefault(); toggleControls(); return; }
+  if (target.matches('input, select, button')) return;
+  if (event.key === 'ArrowLeft') { event.preventDefault(); nextPreset(-1); }
+  if (event.key === 'ArrowRight') { event.preventDefault(); nextPreset(1); }
+  if (event.code === 'Space') { event.preventDefault(); togglePause(); }
+});
+let resizeRequest = 0;
+window.addEventListener('resize', () => { displayCanvas(); window.clearTimeout(resizeRequest); resizeRequest = window.setTimeout(() => { resizeRequest = 0; resize(); }, 180); });
+document.addEventListener('visibilitychange', () => { lastVisualTime = 0; lastRender = 0; });
 const canvas = el<HTMLCanvasElement>('visualizer');
 try {
-  if (!canvas.getContext('webgl2', { alpha: false, antialias: false })) throw new Error('WebGL 2 is unavailable in this WebKit view. Update macOS and reopen the app.');
-  visualizer = butterchurn.createVisualizer(null, canvas, { width: innerWidth, height: innerHeight, pixelRatio: 1, textureRatio: 1 }); resize(); loadPreset(currentPreset, 0);
+  gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
+  if (!gl) throw new Error('WebGL 2 is unavailable in this WebKit view. Update macOS and reopen the app.');
+  visualizer = butterchurn.createVisualizer(null, canvas, { width: 64, height: 64, pixelRatio: 1, textureRatio: 1 }); bufferWidth = 64; bufferHeight = 64; resize(); applyQuality(); loadPreset(currentPreset, 0);
 } catch (error) { setMessage(`Visualizer could not start: ${describeError(error)}`, 'error'); }
 fillPresets();
 if (visualizer) void refreshDevices();
+let lastVisualTime = 0;
 let lastRender = 0, measuredAt = performance.now(), measuredFrames = 0, measuredCPU = 0;
 function render(now: number) {
   requestAnimationFrame(render);
   if (paused || !visualizer || document.hidden) return;
-  const interval = 1000 / (preferences.fps === 30 ? 30 : 60);
+  const interval = 1000 / preferences.fps;
   if (now - lastRender < interval - .7) return;
   lastRender = now - ((now - lastRender) % interval);
-  try { const started = performance.now(); visualizer.render({ audioLevels }); measuredCPU += performance.now() - started; measuredFrames++; }
+  const wallDelta = lastVisualTime ? Math.min(.25, Math.max(.001, (now - lastVisualTime) / 1000)) : 1 / preferences.fps;
+  lastVisualTime = now;
+  try { const started = performance.now(); visualizer.render({ audioLevels, elapsedTime: wallDelta * preferences.speed }); measuredCPU += performance.now() - started; measuredFrames++; }
   catch (error) { paused = true; el('pause').textContent = '▶'; setMessage(`Rendering paused: ${describeError(error)}. Try another preset and resume.`, 'error'); }
   if (now - measuredAt >= 1000) { el('performance').textContent = `${Math.round(measuredFrames * 1000 / (now - measuredAt))} fps · ${(measuredCPU / Math.max(1, measuredFrames)).toFixed(1)} ms CPU`; measuredAt = now; measuredFrames = 0; measuredCPU = 0; }
   if (preferences.auto && now - presetChangedAt > preferences.interval * 1000) randomPreset();

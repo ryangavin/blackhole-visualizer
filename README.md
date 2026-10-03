@@ -27,9 +27,17 @@ BlackHole 2ch was detected on this Mac at 48 kHz during setup. The app queries a
 
 Audio capture uses Core Audio through Rust/CPAL. A bounded latest-sample history supplies 1024 samples per channel to Butterchurn; audio does not accumulate in an event queue. WebKit renders locally using WebGL 2. The capture callback does not run JavaScript or send audio to an output device.
 
-Use the rendering scale and FPS controls to fit your display and preset. High resolutions and some presets demand substantially more GPU work. The frame timing display describes the renderer's observed behavior, not a calibrated audio-to-photon latency measurement. Tauri uses the macOS WebKit runtime and its helper processes; this is one application, not one OS process.
+Use **Render & display** to choose adaptive window scale (25–100%), a fixed HD/Full HD/QHD/4K buffer, or custom dimensions. The actual buffer size is displayed. Fixed sizes default to **Contain**, preserving the entire image with black letterboxing; Cover crops edges and Stretch changes proportions. Dimensions are constrained by GPU limits and a 4K pixel budget. Adaptive Retina density is capped at 2×. Mesh detail and FXAA provide additional quality controls. Frame targets are 15, 24, 30, or 60 FPS. High resolutions and some presets demand substantially more GPU work. The frame timing display describes the renderer's observed behavior, not a calibrated audio-to-photon latency measurement. Tauri uses the macOS WebKit runtime and its helper processes; this is one application, not one OS process.
 
 Sample-rate and buffer choices are device capabilities, not promises of exclusive access. Changing those settings may affect other applications using BlackHole. Default settings preserve the device's current/default configuration where supported.
+
+## Motion and presentation
+
+**Motion → Animation speed** runs the preset clock at 0.1–2×, starting at 0.5× for existing preferences without this setting. It slows time-based movement; frame-driven feedback and beat reactions vary by preset. Lowering the frame target can also calm frame-driven motion. This does not slow or change audio playback.
+
+Preset transition duration is approximately wall-clock seconds at the speed selected when a transition starts; changing speed during a transition changes its remaining duration. Auto drift intervals always use real seconds. Pausing or hiding the app does not accumulate a catch-up jump.
+
+Press **H** for a completely clean presentation: only the visualization and any intentional black letterbox remain. Controls, shading, tooltips, and cursor disappear, and hidden controls cannot receive keyboard focus. There is no hover reveal or floating button. **H** restores controls; **F** toggles fullscreen even in clean mode. Shortcuts do not interrupt text/numeric entry. Arrow keys change presets and Space pauses visuals when not interacting with a form control.
 
 ## Development
 
