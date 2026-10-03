@@ -89,7 +89,8 @@ async function processFiles() {
   await worker?.terminate();
 }
 // Bounded build-time concurrency; the live app never starts these workers.
-await Promise.all(Array.from({ length: 4 }, () => processFiles()));
+const workerCount = Math.max(1, Math.min(8, Number.parseInt(process.env.PRESET_IMPORT_WORKERS || '4', 10) || 4));
+await Promise.all(Array.from({ length: workerCount }, () => processFiles()));
 entries.sort((a, b) => a.collection.localeCompare(b.collection) || a.name.localeCompare(b.name));
 const catalogue = { version, sourceRevision: revision, converted, skipped: failures.length, entries };
 atomicJson(generated, catalogue);
