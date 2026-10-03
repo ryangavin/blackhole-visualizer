@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, copyFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -41,6 +41,13 @@ if (!existsSync(join(source, '.source-revision'))) {
   if (digest !== archiveSha256) throw new Error('Preset archive checksum mismatch; remove .cache/presets/cream.tar.gz and retry.');
   run('tar', ['-xzf', archive, '--strip-components=1', '-C', source]);
   writeFileSync(join(source, '.source-revision'), revision);
+}
+// Converted assets are reusable only with the exact source/compiler schema version.
+const conversionMarker = join(output, '.conversion-version');
+if (!existsSync(conversionMarker) || readFileSync(conversionMarker, 'utf8') !== version) {
+  rmSync(join(output, 'cream'), { recursive: true, force: true });
+  mkdirSync(join(output, 'cream'), { recursive: true });
+  writeFileSync(conversionMarker, version);
 }
 copyFileSync(join(source, 'LICENSE.md'), join(output, 'CREAM-LICENSE.md'));
 const require = createRequire(import.meta.url);
