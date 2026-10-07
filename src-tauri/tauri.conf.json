@@ -5,7 +5,6 @@
   "identifier": "com.ryangavin.blackhole-visualizer",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://127.0.0.1:1420",
     "beforeDevCommand": "npm run web:dev",
     "beforeBuildCommand": "npm run web:build"
   },

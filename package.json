@@ -8,8 +8,8 @@
   },
   "scripts": {
     "start": "node scripts/start.ts",
-    "dev": "tauri dev",
-    "web:dev": "npm run presets:prepare && vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev": "export PORT=${PORT:-$(node -e \"const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})\")} && tauri dev --config \"{\\\"build\\\":{\\\"devUrl\\\":\\\"http://127.0.0.1:$PORT\\\"}}\"",
+    "web:dev": "npm run presets:prepare && vite --host 127.0.0.1",
     "web:build": "npm run presets:prepare && tsc --noEmit && vite build",
     "build": "tauri build --bundles app",
     "tauri": "tauri",

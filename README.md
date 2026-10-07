@@ -58,7 +58,7 @@ npm run dev    # unified Tauri + Vite development launcher
 npm run build  # compile frontend and release macOS app
 ```
 
-The development launcher owns Vite on port 1420. Do not run another Vite instance on that port while it is running.
+The development launcher runs Vite on `$PORT` when set, otherwise on a free port it asks the OS for, and gives Tauri the same address. No port is fixed.
 
 App bundle: `src-tauri/target/release/bundle/macos/BlackHole Visualizer.app`.
 
